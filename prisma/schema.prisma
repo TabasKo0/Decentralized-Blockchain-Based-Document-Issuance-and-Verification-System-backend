@@ -1,0 +1,28 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id               String   @id @default(uuid())
+  email            String   @unique
+  passwordHash     String
+  
+  // Public Identity / Web3 identifiers
+  walletAddress    String   @unique
+  publicKey        String   @unique
+  
+  // SSS Share B (Encrypted with server MASTER_KMS_KEY)
+  encryptedShareB  String
+  
+  // System Roles
+  isIssuer         Boolean  @default(false)
+  isAdmin          Boolean  @default(false)
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
