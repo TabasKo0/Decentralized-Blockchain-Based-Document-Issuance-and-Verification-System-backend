@@ -29,3 +29,11 @@
 
 # Snapshot cheatcodes output
 /snapshots
+
+# agents output
+/.agents
+/.logs
+
+# project markdown files
+PROJECT.MD
+AGENTS.md
