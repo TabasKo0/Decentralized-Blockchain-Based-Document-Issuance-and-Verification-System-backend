@@ -6,8 +6,6 @@ import { IpfsService } from '../services/ipfs.service';
 import { RelayService } from '../services/relay.service';
 import { ethers } from 'ethers';
 
-const relayService = new RelayService();
-
 export const issue = async (req: AuthRequest, res: Response) => {
   try {
     const { citizenWalletAddress, docType } = req.body;
@@ -36,10 +34,12 @@ export const issue = async (req: AuthRequest, res: Response) => {
     // Hash IPFS CID to act as documentHash on chain
     const documentHash = ethers.id(ipfsCID);
 
+    const relayService = new RelayService(process.env.RPC_URL, process.env.RELAYER_PRIVATE_KEY, process.env.CONTRACT_ADDRESS);
     const tx = await relayService.issueDocumentOnChain(documentHash, citizenWalletAddress, docType);
 
     res.json({ success: true, txHash: tx.hash, ipfsCID, documentHash });
   } catch (err: any) {
+    console.error('issue error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
@@ -69,16 +69,19 @@ export const uploadPersonal = async (req: AuthRequest, res: Response) => {
     const ipfsCID = await IpfsService.uploadPayload(payload);
     const documentHash = ethers.id(ipfsCID);
 
+    const relayService = new RelayService(process.env.RPC_URL, process.env.RELAYER_PRIVATE_KEY, process.env.CONTRACT_ADDRESS);
     const tx = await relayService.uploadPersonalDocumentOnChain(documentHash, docType);
 
     res.json({ success: true, txHash: tx.hash, ipfsCID, documentHash });
   } catch (err: any) {
+    console.error('myDocuments error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
 
 export const myDocuments = async (req: AuthRequest, res: Response) => {
   try {
+    const relayService = new RelayService(process.env.RPC_URL, process.env.RELAYER_PRIVATE_KEY, process.env.CONTRACT_ADDRESS);
     const hashes = await relayService.getCitizenDocuments(req.user.walletAddress);
     res.json({ success: true, documentHashes: hashes });
   } catch (err: any) {
@@ -91,6 +94,7 @@ export const revoke = async (req: AuthRequest, res: Response) => {
     const { documentHash } = req.body;
     if (!documentHash) return res.status(400).json({ success: false, message: 'Missing documentHash' });
 
+    const relayService = new RelayService(process.env.RPC_URL, process.env.RELAYER_PRIVATE_KEY, process.env.CONTRACT_ADDRESS);
     const tx = await relayService.revokeDocumentOnChain(documentHash);
     res.json({ success: true, txHash: tx.hash });
   } catch (err: any) {

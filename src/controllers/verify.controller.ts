@@ -7,12 +7,11 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const RPC_URL = process.env.RPC_URL || 'http://127.0.0.1:8545';
-const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
-
 export const verifyDocument = async (req: Request, res: Response) => {
   try {
     const { documentHash } = req.params;
+    const RPC_URL = process.env.RPC_URL || 'http://127.0.0.1:8545';
+    const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
 
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     
@@ -41,6 +40,7 @@ export const verifyDocument = async (req: Request, res: Response) => {
       isRevoked: record.isRevoked
     });
   } catch (err: any) {
+    console.error('verifyDocument error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
