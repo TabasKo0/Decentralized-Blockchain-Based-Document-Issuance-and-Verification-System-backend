@@ -3,7 +3,10 @@ import secrets from '@digitaldefiance/secrets';
 import EthCrypto from 'eth-crypto';
 
 // Use a deterministic MASTER_KMS_KEY for dev/test if not in env
-const MASTER_KMS_KEY = process.env.MASTER_KMS_KEY || '0000000000000000000000000000000000000000000000000000000000000000';
+const RAW_KMS_KEY = process.env.MASTER_KMS_KEY || '0000000000000000000000000000000000000000000000000000000000000000';
+const MASTER_KMS_KEY_BUFFER = RAW_KMS_KEY.length === 64 && /^[0-9a-fA-F]+$/.test(RAW_KMS_KEY)
+  ? Buffer.from(RAW_KMS_KEY, 'hex')
+  : crypto.createHash('sha256').update(RAW_KMS_KEY).digest();
 
 export class CryptoService {
   /**
@@ -89,7 +92,7 @@ export class CryptoService {
    */
   static encryptShareB(shareB: string): string {
     const iv = crypto.randomBytes(12);
-    const key = Buffer.from(MASTER_KMS_KEY, 'hex'); 
+    const key = MASTER_KMS_KEY_BUFFER;
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
     
     let ciphertext = cipher.update(shareB, 'utf8', 'hex');
@@ -111,7 +114,7 @@ export class CryptoService {
     const [ivHex, authTagHex, ciphertextHex] = parts;
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
-    const key = Buffer.from(MASTER_KMS_KEY, 'hex');
+    const key = MASTER_KMS_KEY_BUFFER;
 
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(authTag);
