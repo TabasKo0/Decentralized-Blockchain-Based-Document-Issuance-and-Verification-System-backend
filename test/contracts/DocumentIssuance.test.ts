@@ -61,14 +61,13 @@ describe("DocumentIssuanceConsortium", function () {
 
       await expect(documentIssuance.connect(issuer1).issueDocument(docHash, citizen1.address, docType))
         .to.emit(documentIssuance, "DocumentIssued")
-        .withArgs(docHash, issuer1.address, citizen1.address, true);
+        .withArgs(docHash, issuer1.address, citizen1.address);
 
       const record = await documentIssuance.documents(docHash);
       expect(record.documentHash).to.equal(docHash);
       expect(record.issuer).to.equal(issuer1.address);
       expect(record.citizen).to.equal(citizen1.address);
       expect(record.docType).to.equal(docType);
-      expect(record.isOfficial).to.equal(true);
       expect(record.isRevoked).to.equal(false);
       expect(record.issuedAt).to.be.greaterThan(0);
     });
@@ -91,30 +90,7 @@ describe("DocumentIssuanceConsortium", function () {
     });
   });
 
-  describe("Self-Upload", function () {
-    it("Should allow a citizen to upload a personal document", async function () {
-      const docHash = ethers.id("personal_doc_1");
-      const docType = "ID";
 
-      await expect(documentIssuance.connect(citizen1).uploadPersonalDocument(docHash, docType))
-        .to.emit(documentIssuance, "DocumentIssued")
-        .withArgs(docHash, citizen1.address, citizen1.address, false);
-
-      const record = await documentIssuance.documents(docHash);
-      expect(record.issuer).to.equal(citizen1.address);
-      expect(record.citizen).to.equal(citizen1.address);
-      expect(record.isOfficial).to.equal(false);
-    });
-
-    it("Should prevent duplicate document hashes during self-upload", async function () {
-      const docHash = ethers.id("personal_doc_2");
-
-      await documentIssuance.connect(citizen1).uploadPersonalDocument(docHash, "ID");
-
-      await expect(documentIssuance.connect(citizen1).uploadPersonalDocument(docHash, "ID"))
-        .to.be.revertedWith("Document hash already exists");
-    });
-  });
 
   describe("Revocation", function () {
     let docHash: string;
@@ -166,7 +142,7 @@ describe("DocumentIssuanceConsortium", function () {
       const hash3 = ethers.id("doc3");
 
       await documentIssuance.connect(issuer1).issueDocument(hash1, citizen1.address, "Degree");
-      await documentIssuance.connect(citizen1).uploadPersonalDocument(hash2, "ID");
+      await documentIssuance.connect(issuer1).issueDocument(hash2, citizen1.address, "ID");
       await documentIssuance.connect(issuer1).issueDocument(hash3, citizen1.address, "Certificate");
 
       const citizenDocs = await documentIssuance.getCitizenDocuments(citizen1.address);

@@ -49,16 +49,6 @@ describe('RelayService', function () {
     expect(docs).to.include(docHash);
   });
 
-  it('should upload a personal document on-chain', async function () {
-    const personalHash = ethers.id("relay_personal_doc_1");
-    
-    await relayService.uploadPersonalDocumentOnChain(personalHash, "ID");
-    
-    // The relayer is signers[0], so it should be in signers[0] citizen docs
-    const funderAddress = (await ethers.getSigners())[0].address;
-    const docs = await relayService.getCitizenDocuments(funderAddress);
-    expect(docs).to.include(personalHash);
-  });
 
   it('should revoke a document on-chain', async function () {
     await relayService.revokeDocumentOnChain(docHash);

@@ -56,14 +56,6 @@ export class RelayService {
     return await tx.wait();
   }
 
-  /**
-   * Invokes `uploadPersonalDocument` on-chain.
-   * Allows gasless submission for citizens.
-   */
-  async uploadPersonalDocumentOnChain(docHash: string, docType: string) {
-    const tx = await this.contract.uploadPersonalDocument(docHash, docType);
-    return await tx.wait();
-  }
 
   /**
    * Invokes `revokeDocument` on-chain (Issuer only).

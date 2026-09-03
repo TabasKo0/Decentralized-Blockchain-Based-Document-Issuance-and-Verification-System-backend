@@ -12,14 +12,13 @@ contract DocumentIssuanceConsortium is AccessControl {
         address citizen;
         string docType;
         uint256 issuedAt;
-        bool isOfficial;
         bool isRevoked;
     }
 
     mapping(bytes32 => DocumentRecord) public documents;
     mapping(address => bytes32[]) private citizenDocuments;
 
-    event DocumentIssued(bytes32 indexed documentHash, address indexed issuer, address indexed citizen, bool isOfficial);
+    event DocumentIssued(bytes32 indexed documentHash, address indexed issuer, address indexed citizen);
     event DocumentRevoked(bytes32 indexed documentHash, address indexed issuer);
 
     constructor() {
@@ -41,37 +40,15 @@ contract DocumentIssuanceConsortium is AccessControl {
             citizen: _citizen,
             docType: _docType,
             issuedAt: block.timestamp,
-            isOfficial: true,
             isRevoked: false
         });
 
         citizenDocuments[_citizen].push(_documentHash);
 
-        emit DocumentIssued(_documentHash, msg.sender, _citizen, true);
+        emit DocumentIssued(_documentHash, msg.sender, _citizen);
     }
 
-    /**
-     * @dev Uploads a personal, unofficial document by any citizen.
-     * @param _documentHash The unique hash of the encrypted document.
-     * @param _docType A string indicating the document type.
-     */
-    function uploadPersonalDocument(bytes32 _documentHash, string calldata _docType) external {
-        require(documents[_documentHash].issuedAt == 0, "Document hash already exists");
 
-        documents[_documentHash] = DocumentRecord({
-            documentHash: _documentHash,
-            issuer: msg.sender,
-            citizen: msg.sender,
-            docType: _docType,
-            issuedAt: block.timestamp,
-            isOfficial: false,
-            isRevoked: false
-        });
-
-        citizenDocuments[msg.sender].push(_documentHash);
-
-        emit DocumentIssued(_documentHash, msg.sender, msg.sender, false);
-    }
 
     /**
      * @dev Revokes an existing document. Only the original issuer can revoke it.

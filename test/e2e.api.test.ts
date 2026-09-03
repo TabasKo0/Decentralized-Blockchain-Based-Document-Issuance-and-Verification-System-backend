@@ -193,7 +193,6 @@ describe('Phase 6: End-to-End API Integration', function () {
     expect(res.status).to.equal(200);
     expect(res.body.success).to.be.true;
     expect(res.body.exists).to.be.true;
-    expect(res.body.isOfficial).to.be.true;
     expect(res.body.docType).to.equal('Bachelor of Science');
   });
 });

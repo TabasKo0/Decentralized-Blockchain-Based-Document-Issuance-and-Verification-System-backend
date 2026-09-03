@@ -32,7 +32,6 @@ export const verifyDocument = async (req: Request, res: Response) => {
     res.json({
       success: true,
       exists: true,
-      isOfficial: record.isOfficial,
       issuer: record.issuer,
       citizen: record.citizen,
       docType: record.docType,

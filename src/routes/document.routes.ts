@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { issue, uploadPersonal, myDocuments, revoke } from '../controllers/document.controller';
+import { issue, myDocuments, revoke } from '../controllers/document.controller';
 import { authenticateJWT } from '../middlewares/auth.middleware';
 import { requireIssuer } from '../middlewares/role.middleware';
 import { upload } from '../middlewares/upload.middleware';
@@ -7,7 +7,7 @@ import { upload } from '../middlewares/upload.middleware';
 const router = Router();
 
 // Citizen Routes
-router.post('/upload-personal', authenticateJWT, upload.single('file'), uploadPersonal);
+
 router.get('/my-documents', authenticateJWT, myDocuments);
 
 // Issuer Routes
