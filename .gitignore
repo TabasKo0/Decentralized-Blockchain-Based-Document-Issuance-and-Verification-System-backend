@@ -37,3 +37,5 @@
 # project markdown files
 PROJECT.MD
 AGENTS.md
+/contracts/DocumentIssuanceConsortium_Vanilla_Explained.sol
+/contracts/DocumentIssuanceConsortium_Explained.sol
