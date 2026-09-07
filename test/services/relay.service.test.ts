@@ -28,8 +28,7 @@ describe('RelayService', function () {
     contractAddress = await documentIssuance.getAddress();
 
     // Grant ISSUER_ROLE to funder so the relayer can issue documents
-    const ISSUER_ROLE = await documentIssuance.ISSUER_ROLE();
-    await documentIssuance.grantRole(ISSUER_ROLE, funder.address);
+    await documentIssuance.addIssuer(funder.address);
 
     // Initialize RelayService with injected signer
     relayService = new RelayService(

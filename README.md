@@ -13,6 +13,8 @@ This example project includes:
 - TypeScript integration tests using `mocha` and ethers.js
 - Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
 
+For environment configuration, external services setup (.env), and Web3 architecture documentation, see the [Setup & Web3 Guide](file:///f:/shiii/blockchain/project/backend/SETUP_GUIDE.md).
+
 ## Usage
 
 ### Running Tests

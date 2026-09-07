@@ -62,8 +62,7 @@ describe('Phase 6: End-to-End API Integration', function () {
     await contract.waitForDeployment();
     
     // Grant ISSUER_ROLE to the Relayer account
-    const ISSUER_ROLE = await contract.ISSUER_ROLE();
-    await contract.grantRole(ISSUER_ROLE, admin.address);
+    await contract.addIssuer(admin.address);
     
     contractAddress = await contract.getAddress();
     
@@ -141,8 +140,7 @@ describe('Phase 6: End-to-End API Integration', function () {
     const admin = signers[0];
     const contract = await ethers.getContractAt('DocumentIssuanceConsortium', contractAddress, admin);
     
-    const ISSUER_ROLE = await contract.ISSUER_ROLE();
-    const tx = await contract.grantRole(ISSUER_ROLE, issuerWallet);
+    const tx = await contract.addIssuer(issuerWallet);
     await tx.wait();
   });
 

@@ -11,8 +11,6 @@ describe("DocumentIssuanceConsortium", function () {
   let citizen1: any;
   let citizen2: any;
   let unauthorized: any;
-  let ISSUER_ROLE: string;
-  let DEFAULT_ADMIN_ROLE: string;
 
   beforeEach(async function () {
     const signers = await ethers.getSigners();
@@ -25,34 +23,30 @@ describe("DocumentIssuanceConsortium", function () {
 
     const DocumentIssuance = await ethers.getContractFactory("DocumentIssuanceConsortium");
     documentIssuance = await DocumentIssuance.deploy();
-
-    ISSUER_ROLE = await documentIssuance.ISSUER_ROLE();
-    DEFAULT_ADMIN_ROLE = await documentIssuance.DEFAULT_ADMIN_ROLE();
   });
 
   describe("Deployment & RBAC", function () {
     it("Should set the right admin", async function () {
-      expect(await documentIssuance.hasRole(DEFAULT_ADMIN_ROLE, admin.address)).to.equal(true);
+      expect(await documentIssuance.admin()).to.equal(admin.address);
     });
 
     it("Should allow admin to grant ISSUER_ROLE", async function () {
-      await expect(documentIssuance.grantRole(ISSUER_ROLE, issuer1.address))
-        .to.emit(documentIssuance, "RoleGranted")
-        .withArgs(ISSUER_ROLE, issuer1.address, admin.address);
+      await expect(documentIssuance.addIssuer(issuer1.address))
+        .to.emit(documentIssuance, "IssuerAdded")
+        .withArgs(issuer1.address);
         
-      expect(await documentIssuance.hasRole(ISSUER_ROLE, issuer1.address)).to.equal(true);
+      expect(await documentIssuance.isIssuer(issuer1.address)).to.equal(true);
     });
 
     it("Should not allow unauthorized to grant ISSUER_ROLE", async function () {
-      await expect(documentIssuance.connect(unauthorized).grantRole(ISSUER_ROLE, issuer1.address))
-        .to.be.revertedWithCustomError(documentIssuance, "AccessControlUnauthorizedAccount")
-        .withArgs(unauthorized.address, DEFAULT_ADMIN_ROLE);
+      await expect(documentIssuance.connect(unauthorized).addIssuer(issuer1.address))
+        .to.be.revertedWith("Error: Only the admin can perform this action");
     });
   });
 
   describe("Issuance", function () {
     beforeEach(async function () {
-      await documentIssuance.grantRole(ISSUER_ROLE, issuer1.address);
+      await documentIssuance.addIssuer(issuer1.address);
     });
 
     it("Should allow issuer to issue an official document", async function () {
@@ -76,8 +70,7 @@ describe("DocumentIssuanceConsortium", function () {
       const docHash = ethers.id("official_doc_2");
 
       await expect(documentIssuance.connect(unauthorized).issueDocument(docHash, citizen1.address, "Degree"))
-        .to.be.revertedWithCustomError(documentIssuance, "AccessControlUnauthorizedAccount")
-        .withArgs(unauthorized.address, ISSUER_ROLE);
+        .to.be.revertedWith("Error: Only an authorized issuer can perform this action");
     });
 
     it("Should prevent duplicate document hashes during official issuance", async function () {
@@ -90,13 +83,11 @@ describe("DocumentIssuanceConsortium", function () {
     });
   });
 
-
-
   describe("Revocation", function () {
     let docHash: string;
 
     beforeEach(async function () {
-      await documentIssuance.grantRole(ISSUER_ROLE, issuer1.address);
+      await documentIssuance.addIssuer(issuer1.address);
       docHash = ethers.id("doc_to_revoke");
       await documentIssuance.connect(issuer1).issueDocument(docHash, citizen1.address, "Degree");
     });
@@ -135,7 +126,7 @@ describe("DocumentIssuanceConsortium", function () {
 
   describe("View Functions", function () {
     it("Should retrieve all document hashes for a citizen", async function () {
-      await documentIssuance.grantRole(ISSUER_ROLE, issuer1.address);
+      await documentIssuance.addIssuer(issuer1.address);
 
       const hash1 = ethers.id("doc1");
       const hash2 = ethers.id("doc2");
