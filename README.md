@@ -14,6 +14,7 @@ This example project includes:
 - Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
 
 For environment configuration, external services setup (.env), and Web3 architecture documentation, see the [Setup & Web3 Guide](file:///f:/shiii/blockchain/project/backend/SETUP_GUIDE.md).
+For a detailed analysis of implemented features, test results, and differences relative to `PROJECT.md`, see the [Final Engineering Report](file:///f:/shiii/blockchain/project/backend/FINAL_REPORT.md).
 
 ## Usage
 
