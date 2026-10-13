@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   issueDocument,
+  verifyDocument,
   getMyDocuments,
   revokeDocument,
   getDocumentByHash,
@@ -10,6 +11,9 @@ import { requireIssuer } from '../middlewares/role.middleware';
 import { upload } from '../middlewares/upload.middleware';
 
 const router = Router();
+
+// Public Verification Route (No JWT required, file-based)
+router.post('/verify', upload.single('file'), verifyDocument);
 
 // Citizen Route: retrieve all documents assigned to authenticated citizen
 router.get('/my-documents', authenticateJWT, getMyDocuments);
