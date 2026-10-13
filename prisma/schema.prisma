@@ -34,13 +34,50 @@ model ShareRecord {
 }
 
 model DocumentMetadata {
-  id             String   @id @default(uuid())
-  documentHash   String   @unique
-  ipfsCid        String
-  docType        String
-  issuerAddress  String
-  citizenAddress String
-  issuer         User     @relation("IssuerRelation", fields: [issuerAddress], references: [address])
-  citizen        User     @relation("CitizenRelation", fields: [citizenAddress], references: [address])
-  createdAt      DateTime @default(now())
+  id                     String              @id @default(uuid())
+  documentHash           String              @unique // bytes32 hex anchored on Sepolia
+  ipfsCid                String
+  docType                String
+  issuerAddress          String
+  citizenAddress         String
+  issuer                 User                @relation("IssuerRelation", fields: [issuerAddress], references: [address])
+  citizen                User                @relation("CitizenRelation", fields: [citizenAddress], references: [address])
+
+  // Revocation & Version Provenance
+  isRevoked              Boolean             @default(false)
+  revokedAt              DateTime?
+  revokedTxHash          String?
+  revocationReason       String?
+  supersededByHash       String?
+  expiresAt              DateTime?
+
+  // Forensic Metadata & KMS-wrapped symmetric key for server-side tamper analysis
+  kmsEncryptedSessionKey String?
+  sessionKeyIv           String?
+  sessionKeyAuthTag      String?
+  fileSize               Int?
+  mimeType               String?
+  fileName               String?
+
+  createdAt              DateTime            @default(now())
+
+  // Ephemeral Verification Grants
+  grants                 VerificationGrant[]
+}
+
+model VerificationGrant {
+  id           String           @id @default(uuid())
+  token        String           @unique
+  documentId   String
+  document     DocumentMetadata @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  granteeLabel String?
+  maxViews     Int              @default(1)
+  viewCount    Int              @default(0)
+  expiresAt    DateTime
+  isRevoked    Boolean          @default(false)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([token])
+  @@index([documentId])
 }

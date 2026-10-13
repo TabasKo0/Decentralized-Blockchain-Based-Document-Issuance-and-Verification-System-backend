@@ -84,4 +84,52 @@ describe('CryptoService', function () {
       expect(decryptedShareB).to.equal(shareB);
     });
   });
+
+  describe('Self-Identifying Watermarking & Forensics', function () {
+    const testDocId = '873d7b59-e7bd-45c2-8fe7-bd3ab7782b37';
+    const rawBuffer = Buffer.from('Official Degree Certificate Content', 'utf8');
+
+    it('should embed and extract document watermark', function () {
+      const stamped = CryptoService.embedDocumentWatermark(rawBuffer, testDocId);
+      expect(stamped.length).to.be.greaterThan(rawBuffer.length);
+
+      const extracted = CryptoService.extractDocumentWatermark(stamped);
+      expect(extracted).to.equal(testDocId);
+    });
+
+    it('should extract watermark even if body content is modified', function () {
+      const stamped = CryptoService.embedDocumentWatermark(rawBuffer, testDocId);
+      // Tamper with content in the middle
+      const tampered = Buffer.from(stamped);
+      tampered[5] = 0x58; // modify one byte
+
+      const extracted = CryptoService.extractDocumentWatermark(tampered);
+      expect(extracted).to.equal(testDocId);
+    });
+
+    it('should compute chunk hashes and detect corrupted 4KB chunks', function () {
+      const largeBuffer = Buffer.alloc(10000, 0x41); // ~10KB (3 chunks)
+      const chunkHashes = CryptoService.computeChunkHashes(largeBuffer, 4096);
+      expect(chunkHashes.length).to.equal(3);
+
+      // Tamper in chunk 1 (offset 5000)
+      const tampered = Buffer.from(largeBuffer);
+      tampered[5000] = 0x42;
+
+      const comparison = CryptoService.compareChunkHashes(chunkHashes, tampered, 4096);
+      expect(comparison.totalChunks).to.equal(3);
+      expect(comparison.intactChunksCount).to.equal(2);
+      expect(comparison.corruptedChunksCount).to.equal(1);
+      expect(comparison.corruptedChunkIndices).to.deep.equal([1]);
+    });
+
+    it('should encrypt and decrypt session key with KMS', function () {
+      const sessionKey = CryptoService.generateSessionKey();
+      const wrapped = CryptoService.encryptSessionKeyWithKms(sessionKey);
+      expect(wrapped).to.have.property('encryptedShareB');
+
+      const unwrapped = CryptoService.decryptSessionKeyWithKms(wrapped.encryptedShareB, wrapped.iv, wrapped.authTag);
+      expect(unwrapped.toString('hex')).to.equal(sessionKey.toString('hex'));
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import secrets from '@digitaldefiance/secrets';
 import EthCrypto from 'eth-crypto';
+import { ethers } from 'ethers';
 import { KmsService } from './kms.service';
 
 export class CryptoService {
@@ -75,6 +76,93 @@ export class CryptoService {
     const cleanPrivateKey = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
     const sessionKeyHex = await EthCrypto.decryptWithPrivateKey(cleanPrivateKey, encryptedSessionKey);
     return Buffer.from(sessionKeyHex, 'hex');
+  }
+
+  /**
+   * Encrypts the session key with the server's MASTER_KMS_KEY for in-memory tamper forensics.
+   */
+  static encryptSessionKeyWithKms(sessionKey: Buffer) {
+    const sessionKeyHex = sessionKey.toString('hex');
+    return KmsService.encryptShareB(sessionKeyHex);
+  }
+
+  /**
+   * Decrypts the KMS-encrypted session key for in-memory tamper forensics.
+   */
+  static decryptSessionKeyWithKms(encryptedKey: string, iv: string, authTag: string): Buffer {
+    const sessionKeyHex = KmsService.decryptShareB(encryptedKey, iv, authTag);
+    return Buffer.from(sessionKeyHex, 'hex');
+  }
+
+  /**
+   * Embeds an invisible forensic trailer watermark into the document buffer
+   * before Keccak-256 hashing and IPFS encryption.
+   */
+  static embedDocumentWatermark(buffer: Buffer, documentId: string): Buffer {
+    const marker = Buffer.from(`\n%%CONSORTIUM-DOC-ID:${documentId}%%\n`, 'utf8');
+    return Buffer.concat([buffer, marker]);
+  }
+
+  /**
+   * Extracts the embedded documentId watermark from an uploaded buffer (zero-hint forensics).
+   */
+  static extractDocumentWatermark(buffer: Buffer): string | null {
+    // Scan trailer window first (last 2048 bytes)
+    const trailerWindow = buffer.subarray(Math.max(0, buffer.length - 2048)).toString('utf8');
+    const trailerMatch = trailerWindow.match(/%%CONSORTIUM-DOC-ID:([a-fA-F0-9-]+)%%/);
+    if (trailerMatch) {
+      return trailerMatch[1];
+    }
+
+    // Fallback: scan whole buffer as string
+    const fullText = buffer.toString('utf8');
+    const fullMatch = fullText.match(/%%CONSORTIUM-DOC-ID:([a-fA-F0-9-]+)%%/);
+    return fullMatch ? fullMatch[1] : null;
+  }
+
+  /**
+   * Splits a buffer into fixed 4KB chunks and computes Keccak-256 chunk hashes.
+   */
+  static computeChunkHashes(buffer: Buffer, chunkSize: number = 4096): string[] {
+    const hashes: string[] = [];
+    for (let i = 0; i < buffer.length; i += chunkSize) {
+      const chunk = buffer.subarray(i, Math.min(i + chunkSize, buffer.length));
+      hashes.push(ethers.keccak256(chunk));
+    }
+    return hashes;
+  }
+
+  /**
+   * Compares an uploaded buffer's 4KB chunks against authentic chunk hashes.
+   */
+  static compareChunkHashes(
+    authenticChunkHashes: string[],
+    uploadedBuffer: Buffer,
+    chunkSize: number = 4096
+  ) {
+    const uploadedChunkHashes = this.computeChunkHashes(uploadedBuffer, chunkSize);
+    const maxChunks = Math.max(authenticChunkHashes.length, uploadedChunkHashes.length);
+    const intactChunkIndices: number[] = [];
+    const corruptedChunkIndices: number[] = [];
+
+    for (let i = 0; i < maxChunks; i++) {
+      const authHash = authenticChunkHashes[i];
+      const upHash = uploadedChunkHashes[i];
+      if (authHash && upHash && authHash === upHash) {
+        intactChunkIndices.push(i);
+      } else {
+        corruptedChunkIndices.push(i);
+      }
+    }
+
+    return {
+      totalChunks: authenticChunkHashes.length,
+      uploadedChunks: uploadedChunkHashes.length,
+      intactChunksCount: intactChunkIndices.length,
+      corruptedChunksCount: corruptedChunkIndices.length,
+      intactChunkIndices,
+      corruptedChunkIndices,
+    };
   }
 
   /**

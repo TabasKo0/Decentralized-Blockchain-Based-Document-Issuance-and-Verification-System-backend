@@ -15,6 +15,9 @@ contract DocumentIssuanceConsortium is AccessControl {
         string docType;
         uint256 issuedAt;
         bool isRevoked;
+        string revocationReason;
+        bytes32 supersededBy;
+        uint64 expiresAt; // 0 for non-expiring
     }
 
     mapping(bytes32 => DocumentRecord) public documents;
@@ -23,10 +26,17 @@ contract DocumentIssuanceConsortium is AccessControl {
     event DocumentIssued(
         bytes32 indexed documentHash, 
         address indexed issuer, 
-        address indexed citizen
+        address indexed citizen,
+        uint64 expiresAt
     );
     event DocumentRevoked(
         bytes32 indexed documentHash, 
+        address indexed issuer,
+        string reason
+    );
+    event DocumentSuperseded(
+        bytes32 indexed oldHash,
+        bytes32 indexed newHash,
         address indexed issuer
     );
     event IssuerAdded(address indexed issuer);
@@ -58,7 +68,6 @@ contract DocumentIssuanceConsortium is AccessControl {
 
     /**
      * @dev Gives an organization (e.g. University/Hospital) permission to issue official documents.
-     * Can ONLY be called by the Admin.
      */
     function addIssuer(address _newIssuer) external onlyAdmin {
         require(_newIssuer != address(0), "Cannot add zero address");
@@ -70,7 +79,6 @@ contract DocumentIssuanceConsortium is AccessControl {
 
     /**
      * @dev Revokes an organization's permission to issue documents.
-     * Can ONLY be called by the Admin.
      */
     function removeIssuer(address _issuer) external onlyAdmin {
         require(hasRole(ISSUER_ROLE, _issuer), "Not currently an issuer");
@@ -94,16 +102,14 @@ contract DocumentIssuanceConsortium is AccessControl {
         emit AdminTransferred(oldAdmin, _newAdmin);
     }
 
-    /**
-     * @dev Issues an official certificate or document.
-     * Protected by `onlyIssuer` modifier.
-     */
-    function issueDocument(
+    function _issueDocumentInternal(
         bytes32 _documentHash, 
         address _citizen, 
-        string calldata _docType
-    ) external onlyIssuer {
+        string calldata _docType,
+        uint64 _expiresAt
+    ) internal {
         require(documents[_documentHash].issuedAt == 0, "Document hash already exists");
+        require(_citizen != address(0), "Cannot issue to zero address");
 
         documents[_documentHash] = DocumentRecord({
             documentHash: _documentHash,
@@ -111,26 +117,79 @@ contract DocumentIssuanceConsortium is AccessControl {
             citizen: _citizen,
             docType: _docType,
             issuedAt: block.timestamp,
-            isRevoked: false
+            isRevoked: false,
+            revocationReason: "",
+            supersededBy: bytes32(0),
+            expiresAt: _expiresAt
         });
 
         citizenDocuments[_citizen].push(_documentHash);
 
-        emit DocumentIssued(_documentHash, msg.sender, _citizen);
+        emit DocumentIssued(_documentHash, msg.sender, _citizen, _expiresAt);
     }
 
     /**
-     * @dev Revokes a document. Only the original issuer can revoke it.
+     * @dev Standard issuance (non-expiring, _expiresAt = 0).
      */
-    function revokeDocument(bytes32 _documentHash) external {
+    function issueDocument(
+        bytes32 _documentHash, 
+        address _citizen, 
+        string calldata _docType
+    ) external onlyIssuer {
+        _issueDocumentInternal(_documentHash, _citizen, _docType, 0);
+    }
+
+    /**
+     * @dev Issuance with explicit expiration timestamp.
+     */
+    function issueDocument(
+        bytes32 _documentHash, 
+        address _citizen, 
+        string calldata _docType,
+        uint64 _expiresAt
+    ) external onlyIssuer {
+        _issueDocumentInternal(_documentHash, _citizen, _docType, _expiresAt);
+    }
+
+    /**
+     * @dev Revokes a document with an immutable reason anchored on Sepolia.
+     */
+    function revokeDocument(bytes32 _documentHash, string memory _reason) public {
         DocumentRecord storage doc = documents[_documentHash];
         require(doc.issuedAt != 0, "Document does not exist");
         require(doc.issuer == msg.sender, "Only the issuer can revoke");
         require(!doc.isRevoked, "Document is already revoked");
 
         doc.isRevoked = true;
+        doc.revocationReason = _reason;
 
-        emit DocumentRevoked(_documentHash, msg.sender);
+        emit DocumentRevoked(_documentHash, msg.sender, _reason);
+    }
+
+    /**
+     * @dev Overload for revocation without explicit reason (defaults to UNSPECIFIED).
+     */
+    function revokeDocument(bytes32 _documentHash) external {
+        revokeDocument(_documentHash, "UNSPECIFIED");
+    }
+
+    /**
+     * @dev Supersedes an old document with a newly issued document, forming a version chain.
+     */
+    function supersedeDocument(bytes32 _oldHash, bytes32 _newHash) external {
+        DocumentRecord storage oldDoc = documents[_oldHash];
+        require(oldDoc.issuedAt != 0, "Old document does not exist");
+        require(oldDoc.issuer == msg.sender, "Only the issuer can supersede");
+        require(!oldDoc.isRevoked, "Old document is already revoked");
+        require(documents[_newHash].issuedAt != 0, "New document must exist before superseding");
+        require(documents[_newHash].issuer == msg.sender, "New document must be from same issuer");
+
+        oldDoc.isRevoked = true;
+        oldDoc.revocationReason = "SUPERSEDED";
+        oldDoc.supersededBy = _newHash;
+
+        emit DocumentSuperseded(_oldHash, _newHash, msg.sender);
+        emit DocumentRevoked(_oldHash, msg.sender, "SUPERSEDED");
     }
 
     /**
@@ -140,4 +199,3 @@ contract DocumentIssuanceConsortium is AccessControl {
         return citizenDocuments[_citizen];
     }
 }
-
