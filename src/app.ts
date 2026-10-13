@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 
@@ -29,6 +30,14 @@ app.use('/api/verify', verifyRoutes);
 
 // Error Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid JSON payload received',
+      error: err.message,
+    });
+  }
+
   console.error('Unhandled server error:', err);
   res.status(500).json({
     success: false,

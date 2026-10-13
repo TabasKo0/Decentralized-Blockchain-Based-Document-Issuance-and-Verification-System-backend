@@ -1,10 +1,52 @@
+import 'dotenv/config';
 import pinataSDK from '@pinata/sdk';
 import { Readable } from 'stream';
 
-const pinataJwt = process.env.PINATA_JWT || '';
-// Handle ESM/CJS interop for @pinata/sdk
 const PinataClientConstructor = (pinataSDK as any).default || pinataSDK;
-export const pinata = new (PinataClientConstructor as any)({ pinataJWTKey: pinataJwt });
+
+/**
+ * Creates and returns an initialized Pinata SDK client based on available environment variables.
+ * Supports either PINATA_JWT or PINATA_API_KEY + PINATA_SECRET_API_KEY.
+ */
+export function createPinataClient() {
+  const jwt = process.env.PINATA_JWT?.trim();
+  const apiKey = process.env.PINATA_API_KEY?.trim();
+  const apiSecret = (process.env.PINATA_SECRET_API_KEY || process.env.PINATA_API_SECRET)?.trim();
+
+  if (jwt) {
+    return new (PinataClientConstructor as any)({ pinataJWTKey: jwt });
+  }
+
+  if (apiKey && apiSecret) {
+    return new (PinataClientConstructor as any)(apiKey, apiSecret);
+  }
+
+  // Fallback dummy credentials to prevent crashing on import if unconfigured
+  return new (PinataClientConstructor as any)('dummy_key', 'dummy_secret');
+}
+
+// Global mutable mock store for testing overrides
+const mockOverrides: Record<string, any> = {};
+
+// Transparent proxy to support dynamic initialization and unit-test mocking
+export const pinata: any = new Proxy({}, {
+  get(target, prop: string) {
+    if (prop in mockOverrides) {
+      return mockOverrides[prop];
+    }
+    const client = createPinataClient();
+    const value = client[prop];
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
+  set(target, prop: string, value: any) {
+    mockOverrides[prop] = value;
+    return true;
+  },
+  deleteProperty(target, prop: string) {
+    delete mockOverrides[prop];
+    return true;
+  },
+});
 
 export class PinataService {
   /**
@@ -30,30 +72,40 @@ export class PinataService {
         }
       }
 
-      // Fallback via REST API if PINATA_JWT is present
-      if (process.env.PINATA_JWT) {
-        const response = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.PINATA_JWT}`,
-          },
-          body: JSON.stringify({
-            pinataContent: payload,
-            pinataMetadata: options?.pinataMetadata,
-          }),
-        });
+      // Fallback via direct Pinata REST API
+      const jwt = process.env.PINATA_JWT?.trim();
+      const apiKey = process.env.PINATA_API_KEY?.trim();
+      const apiSecret = (process.env.PINATA_SECRET_API_KEY || process.env.PINATA_API_SECRET)?.trim();
 
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`Pinata API returned ${response.status}: ${errText}`);
-        }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
 
-        const data = (await response.json()) as { IpfsHash: string };
-        return data.IpfsHash;
+      if (jwt) {
+        headers['Authorization'] = `Bearer ${jwt}`;
+      } else if (apiKey && apiSecret) {
+        headers['pinata_api_key'] = apiKey;
+        headers['pinata_secret_api_key'] = apiSecret;
+      } else {
+        throw new Error('No Pinata credentials provided. Please set PINATA_JWT or PINATA_API_KEY and PINATA_SECRET_API_KEY in .env');
       }
 
-      throw new Error('Pinata credentials not configured or pinning failed');
+      const response = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          pinataContent: payload,
+          pinataMetadata: options?.pinataMetadata,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Pinata API returned ${response.status}: ${errText}`);
+      }
+
+      const data = (await response.json()) as { IpfsHash: string };
+      return data.IpfsHash;
     } catch (error: any) {
       console.error('Pinata pinJSONToIPFS error:', error);
       throw new Error(`Failed to pin JSON payload to IPFS: ${error.message}`);

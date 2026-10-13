@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { ethers } from 'ethers';
 import fs from 'fs';
 import path from 'path';
