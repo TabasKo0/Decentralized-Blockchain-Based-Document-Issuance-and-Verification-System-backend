@@ -23,7 +23,7 @@ describe('RelayService', function () {
     issuerAddress = issuer.address;
     citizenAddress = citizen.address;
 
-    const DocumentIssuance = await ethers.getContractFactory("DocumentIssuanceConsortium");
+    const DocumentIssuance = await ethers.getContractFactory("contracts/DocumentIssuanceConsortium.sol:DocumentIssuanceConsortium");
     const documentIssuance = await DocumentIssuance.deploy();
     contractAddress = await documentIssuance.getAddress();
 

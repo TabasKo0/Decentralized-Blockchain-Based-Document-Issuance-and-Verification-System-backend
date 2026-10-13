@@ -1,38 +1,28 @@
 import crypto from 'crypto';
 import secrets from '@digitaldefiance/secrets';
 import EthCrypto from 'eth-crypto';
-
-// Use a deterministic MASTER_KMS_KEY for dev/test if not in env
-const RAW_KMS_KEY = process.env.MASTER_KMS_KEY || '0000000000000000000000000000000000000000000000000000000000000000';
-const MASTER_KMS_KEY_BUFFER = RAW_KMS_KEY.length === 64 && /^[0-9a-fA-F]+$/.test(RAW_KMS_KEY)
-  ? Buffer.from(RAW_KMS_KEY, 'hex')
-  : crypto.createHash('sha256').update(RAW_KMS_KEY).digest();
+import { KmsService } from './kms.service';
 
 export class CryptoService {
   /**
-   * Splits a private key hex string into 3 shares with a threshold of 2.
+   * Splits a private key hex string into strict 2-of-2 shares.
    * @param privateKeyHex 256-bit private key in hex
+   * @returns Share B (for KMS/DB) and Share C (ephemeral for citizen)
    */
-  static splitKey(privateKeyHex: string) {
-    // Strip '0x' if present
+  static splitKey(privateKeyHex: string): { shareB: string; shareC: string } {
     const cleanKey = privateKeyHex.startsWith('0x') ? privateKeyHex.slice(2) : privateKeyHex;
-    // secrets.share expects a hex string
-    const shares = secrets.share(cleanKey, 3, 2);
+    const shares = secrets.share(cleanKey, 2, 2);
     return {
-      shareA: shares[0],
-      shareB: shares[1],
-      shareC: shares[2]
+      shareB: shares[0],
+      shareC: shares[1],
     };
   }
 
   /**
-   * Combines any 2 valid shares to reconstruct the private key.
+   * Combines 2 shares to reconstruct the private key hex.
    */
   static combineShares(share1: string, share2: string): string {
-    const combined = secrets.combine([share1, share2]);
-    // Optionally pad or add '0x' depending on downstream requirements,
-    // but typically we'll return raw hex.
-    return combined;
+    return secrets.combine([share1, share2]);
   }
 
   /**
@@ -43,12 +33,12 @@ export class CryptoService {
   }
 
   /**
-   * Encrypts a raw file buffer using AES-256-GCM and the session key.
+   * Encrypts a raw file buffer using AES-256-GCM.
    */
   static encryptFile(fileBuffer: Buffer, sessionKey: Buffer) {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', sessionKey, iv);
-    
+
     let ciphertext = cipher.update(fileBuffer);
     const finalBuffer = cipher.final();
     ciphertext = Buffer.concat([ciphertext, finalBuffer]);
@@ -71,57 +61,33 @@ export class CryptoService {
 
   /**
    * Wraps (encrypts) the session key using the citizen's public key via ECIES.
-   * EthCrypto expects the public key as a 130-character hex string (with or without '0x' prefix).
    */
   static async wrapSessionKey(sessionKey: Buffer, publicKey: string) {
     const sessionKeyHex = sessionKey.toString('hex');
-    const encrypted = await EthCrypto.encryptWithPublicKey(publicKey, sessionKeyHex);
-    return encrypted; // { iv, ephemPublicKey, ciphertext, mac }
+    const cleanPublicKey = publicKey.startsWith('0x') ? publicKey.slice(2) : publicKey;
+    return await EthCrypto.encryptWithPublicKey(cleanPublicKey, sessionKeyHex);
   }
 
   /**
    * Unwraps (decrypts) the session key using the citizen's private key.
    */
   static async unwrapSessionKey(encryptedSessionKey: any, privateKey: string): Promise<Buffer> {
-    const sessionKeyHex = await EthCrypto.decryptWithPrivateKey(privateKey, encryptedSessionKey);
+    const cleanPrivateKey = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+    const sessionKeyHex = await EthCrypto.decryptWithPrivateKey(cleanPrivateKey, encryptedSessionKey);
     return Buffer.from(sessionKeyHex, 'hex');
   }
 
   /**
-   * Symmetrically encrypts Share B using the MASTER_KMS_KEY for safe storage.
+   * Delegates KMS Share B encryption to KmsService.
    */
-  static encryptShareB(shareB: string): string {
-    const iv = crypto.randomBytes(12);
-    const key = MASTER_KMS_KEY_BUFFER;
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    
-    let ciphertext = cipher.update(shareB, 'utf8', 'hex');
-    ciphertext += cipher.final('hex');
-    const authTag = cipher.getAuthTag().toString('hex');
-
-    // Store as IV : AuthTag : Ciphertext
-    return `${iv.toString('hex')}:${authTag}:${ciphertext}`;
+  static encryptShareB(shareB: string) {
+    return KmsService.encryptShareB(shareB);
   }
 
   /**
-   * Decrypts an encrypted Share B using the MASTER_KMS_KEY.
+   * Delegates KMS Share B decryption to KmsService.
    */
-  static decryptShareB(encryptedShareBPayload: string): string {
-    const parts = encryptedShareBPayload.split(':');
-    if (parts.length !== 3) {
-      throw new Error('Invalid encrypted Share B payload');
-    }
-    const [ivHex, authTagHex, ciphertextHex] = parts;
-    const iv = Buffer.from(ivHex, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
-    const key = MASTER_KMS_KEY_BUFFER;
-
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(ciphertextHex, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return decrypted;
+  static decryptShareB(encryptedShareB: string, iv: string, authTag: string) {
+    return KmsService.decryptShareB(encryptedShareB, iv, authTag);
   }
 }

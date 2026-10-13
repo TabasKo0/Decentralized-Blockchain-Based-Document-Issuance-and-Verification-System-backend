@@ -4,6 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
     "compile": "hardhat compile",
     "test": "hardhat test",
     "db:push": "prisma db push",
@@ -27,7 +32,8 @@
     "ethers": "^6.17.0",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
-    "multer": "^2.3.0"
+    "multer": "^2.3.0",
+    "siwe": "^3.0.0"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.15",

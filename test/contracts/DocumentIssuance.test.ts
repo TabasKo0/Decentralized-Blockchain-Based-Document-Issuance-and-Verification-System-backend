@@ -21,7 +21,7 @@ describe("DocumentIssuanceConsortium", function () {
     citizen2 = signers[4];
     unauthorized = signers[5];
 
-    const DocumentIssuance = await ethers.getContractFactory("DocumentIssuanceConsortium");
+    const DocumentIssuance = await ethers.getContractFactory("contracts/DocumentIssuanceConsortium.sol:DocumentIssuanceConsortium");
     documentIssuance = await DocumentIssuance.deploy();
   });
 

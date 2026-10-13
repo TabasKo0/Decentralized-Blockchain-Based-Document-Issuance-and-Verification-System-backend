@@ -1,42 +1,32 @@
 import type { Request, Response } from 'express';
-import { ethers } from 'ethers';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { RelayerService } from '../services/relayer.service';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const relayerService = new RelayerService();
 
 export const verifyDocument = async (req: Request, res: Response) => {
   try {
-    const { documentHash } = req.params;
-    const RPC_URL = process.env.RPC_URL || 'http://127.0.0.1:8545';
-    const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
+    const rawParam = req.params.documentHash;
+    const documentHash = Array.isArray(rawParam) ? rawParam[0] : rawParam;
 
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
-    
-    let abi: any[] = [];
-    const artifactPath = path.resolve(__dirname, '../../artifacts/contracts/DocumentIssuanceConsortium.sol/DocumentIssuanceConsortium.json');
-    if (fs.existsSync(artifactPath)) {
-      abi = JSON.parse(fs.readFileSync(artifactPath, 'utf8')).abi;
+    if (!documentHash) {
+      return res.status(400).json({ success: false, message: 'Document hash is required' });
     }
 
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, provider);
-    
-    const record = await contract.documents(documentHash);
+    const record = await relayerService.getDocument(documentHash);
 
-    if (record.issuedAt === 0n) {
-      return res.status(404).json({ success: false, message: 'Document not found' });
+    if (!record || record.issuedAt === 0n) {
+      return res.status(404).json({ success: false, message: 'Document not found on-chain' });
     }
 
     res.json({
       success: true,
       exists: true,
+      documentHash: record.documentHash,
       issuer: record.issuer,
       citizen: record.citizen,
       docType: record.docType,
-      issuedAt: record.issuedAt.toString(), // Convert BigInt
-      isRevoked: record.isRevoked
+      issuedAt: record.issuedAt.toString(),
+      isRevoked: record.isRevoked,
     });
   } catch (err: any) {
     console.error('verifyDocument error:', err);

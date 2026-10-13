@@ -57,7 +57,7 @@ describe('Phase 6: End-to-End API Integration', function () {
     const signers = await ethers.getSigners();
     const admin = signers[0];
     
-    const ContractFactory = await ethers.getContractFactory('DocumentIssuanceConsortium', admin);
+    const ContractFactory = await ethers.getContractFactory('contracts/DocumentIssuanceConsortium.sol:DocumentIssuanceConsortium', admin);
     const contract = await ContractFactory.deploy();
     await contract.waitForDeployment();
     
@@ -138,7 +138,7 @@ describe('Phase 6: End-to-End API Integration', function () {
     // The backend registered them, but on the blockchain, the Admin must grant ISSUER_ROLE
     const signers = await ethers.getSigners();
     const admin = signers[0];
-    const contract = await ethers.getContractAt('DocumentIssuanceConsortium', contractAddress, admin);
+    const contract = await ethers.getContractAt('contracts/DocumentIssuanceConsortium.sol:DocumentIssuanceConsortium', contractAddress, admin);
     
     const tx = await contract.addIssuer(issuerWallet);
     await tx.wait();

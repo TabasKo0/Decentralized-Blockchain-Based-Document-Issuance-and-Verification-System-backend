@@ -7,22 +7,40 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum Role {
+  ISSUER
+  CITIZEN
+}
+
 model User {
-  id               String   @id @default(uuid())
-  email            String   @unique
-  passwordHash     String
-  
-  // Public Identity / Web3 identifiers
-  walletAddress    String   @unique
-  publicKey        String   @unique
-  
-  // SSS Share B (Encrypted with server MASTER_KMS_KEY)
-  encryptedShareB  String
-  
-  // System Roles
-  isIssuer         Boolean  @default(false)
-  isAdmin          Boolean  @default(false)
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id               String             @id @default(uuid())
+  address          String             @unique
+  role             Role               @default(CITIZEN)
+  publicKey        String?
+  createdAt        DateTime           @default(now())
+  shareRecord      ShareRecord?
+  issuedDocuments  DocumentMetadata[] @relation("IssuerRelation")
+  citizenDocuments DocumentMetadata[] @relation("CitizenRelation")
+}
+
+model ShareRecord {
+  id              String   @id @default(uuid())
+  userAddress     String   @unique
+  user            User     @relation(fields: [userAddress], references: [address], onDelete: Cascade)
+  encryptedShareB String
+  iv              String
+  authTag         String
+  createdAt       DateTime @default(now())
+}
+
+model DocumentMetadata {
+  id             String   @id @default(uuid())
+  documentHash   String   @unique
+  ipfsCid        String
+  docType        String
+  issuerAddress  String
+  citizenAddress String
+  issuer         User     @relation("IssuerRelation", fields: [issuerAddress], references: [address])
+  citizen        User     @relation("CitizenRelation", fields: [citizenAddress], references: [address])
+  createdAt      DateTime @default(now())
 }
