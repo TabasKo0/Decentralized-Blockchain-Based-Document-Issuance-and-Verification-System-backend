@@ -10,10 +10,19 @@ import type { AuthRequest } from '../middlewares/auth.middleware';
 
 const relayerService = new RelayerService();
 
+let readOnlyContractOverride: any = null;
+
+export const setReadOnlyContractOverride = (override: any) => {
+  readOnlyContractOverride = override;
+};
+
 /**
  * Returns a read-only instance of DocumentIssuanceConsortium (no private key or relayer required).
  */
-const getReadOnlyContract = () => {
+export const getReadOnlyContract = () => {
+  if (readOnlyContractOverride) {
+    return readOnlyContractOverride;
+  }
   const rpcUrl = process.env.SEPOLIA_RPC_URL || process.env.RPC_URL || 'http://127.0.0.1:8545';
   const contractAddress = process.env.CONTRACT_ADDRESS || '0xa08Bfaf6f138c91e9a9562240030E6AdF7F3cF5e';
   const isSepolia = rpcUrl.includes('sepolia');
@@ -45,6 +54,10 @@ export const issueDocument = async (req: AuthRequest, res: Response) => {
 
     if (!citizenWalletInput || !docType) {
       return res.status(400).json({ success: false, message: 'citizenAddress and docType are required' });
+    }
+
+    if (!ethers.isAddress(citizenWalletInput)) {
+      return res.status(400).json({ success: false, message: 'Invalid Ethereum citizenAddress' });
     }
 
     const citizenAddress = ethers.getAddress(citizenWalletInput);
@@ -129,6 +142,7 @@ export const issueDocument = async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       documentId,
+      document: docRecord,
       txHash: receipt.hash,
       blockNumber: receipt.blockNumber,
       ipfsCid,
@@ -262,7 +276,7 @@ export const verifyGrant = async (req: Request, res: Response) => {
       return res.status(410).json({
         success: false,
         status: 'SELF_DESTRUCTED',
-        verificationStatus: 'EXPIRED',
+        verificationStatus: 'GRANT_EXPIRED',
         message: 'Verification grant has expired',
       });
     }
@@ -469,6 +483,8 @@ export const supersedeDocument = async (req: AuthRequest, res: Response) => {
 
     res.json({
       success: true,
+      isRevoked: true,
+      isSuperseded: true,
       txHash: receipt.hash,
       oldDocumentHash: oldDoc.documentHash,
       supersededByHash: newDoc.documentHash,
@@ -555,43 +571,25 @@ export const verifyDocument = async (req: Request, res: Response) => {
       });
     }
 
-    // Zero-Hint Watermark Extraction from uploaded buffer
+    // Step 1: Query by uploaded Keccak256 hash first for authentic match
+    let targetDoc = await prisma.documentMetadata.findUnique({
+      where: { documentHash: uploadedHash },
+    });
+
+    // Step 2: Zero-Trust Lock Down against IDOR Snooping
+    // If hash does not directly match, trigger Tamper Forensics STRICTLY & EXCLUSIVELY
+    // when the uploaded file carries a verified HMAC-SHA256 authenticated watermark.
     let embeddedId: string | null = null;
-    if (uploadedBuffer) {
+    if (!targetDoc && uploadedBuffer) {
       embeddedId = CryptoService.extractDocumentWatermark(uploadedBuffer);
+      if (embeddedId) {
+        targetDoc = await prisma.documentMetadata.findUnique({
+          where: { id: embeddedId },
+        });
+      }
     }
 
-    // Check explicit request hints
-    const claimedId = req.body.documentId || req.body.claimedDocumentId || embeddedId;
-    const citizenAddressHint = req.body.citizenAddress || req.body.citizenWalletAddress;
-    const docTypeHint = req.body.docType;
-
-    // Locate target document
-    let targetDoc: any = null;
-
-    if (claimedId) {
-      targetDoc = await prisma.documentMetadata.findUnique({
-        where: { id: claimedId },
-      });
-    }
-
-    if (!targetDoc && citizenAddressHint && docTypeHint) {
-      targetDoc = await prisma.documentMetadata.findFirst({
-        where: {
-          citizenAddress: ethers.getAddress(citizenAddressHint),
-          docType: docTypeHint,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-    }
-
-    if (!targetDoc) {
-      targetDoc = await prisma.documentMetadata.findUnique({
-        where: { documentHash: uploadedHash },
-      });
-    }
-
-    // Branch 1: Unregistered Document
+    // Branch 1: Unregistered Document (no valid hash match and no valid HMAC watermark)
     if (!targetDoc) {
       return res.json({
         success: true,
@@ -727,12 +725,12 @@ export const verifyDocument = async (req: Request, res: Response) => {
 
         // Determine verdict
         let verdict = 'CONTENT_MODIFIED';
-        if (firstDivergentByteOffset >= 0 && firstDivergentByteOffset < 1024) {
-          verdict = 'HEADER_ALTERED';
-        } else if (sizeDifferenceBytes < 0 && diffBytes === 0) {
-          verdict = 'TRUNCATED';
+        if (sizeDifferenceBytes < 0) {
+          verdict = 'PAYLOAD_TRUNCATED';
         } else if (sizeDifferenceBytes > 0 && diffBytes === 0) {
           verdict = 'APPENDED_DATA';
+        } else if (firstDivergentByteOffset >= 0 && firstDivergentByteOffset < 1024) {
+          verdict = 'HEADER_ALTERED';
         } else if (diffBytes > commonLen * 0.7) {
           verdict = 'TOTAL_MISMATCH';
         }
@@ -810,7 +808,34 @@ export const verifyDocument = async (req: Request, res: Response) => {
 };
 
 /**
- * Returns documents owned by the calling citizen (PostgreSQL + IPFS CIDs).
+ * Sanitizes a document metadata object by stripping server-side KMS encryption keys
+ * and computing a top-level lifecycle status.
+ */
+export const sanitizeDocument = (doc: any) => {
+  if (!doc) return null;
+  const {
+    kmsEncryptedSessionKey,
+    sessionKeyIv,
+    sessionKeyAuthTag,
+    ...sanitized
+  } = doc;
+
+  const status = sanitized.isRevoked
+    ? 'REVOKED'
+    : sanitized.supersededByHash
+    ? 'SUPERSEDED'
+    : 'ACTIVE';
+
+  return {
+    ...sanitized,
+    status,
+  };
+};
+
+/**
+ * Citizen Credential Wallet Endpoint:
+ * Returns all credentials issued to the authenticated citizen, ordered by newest first,
+ * with related ephemeral grants and KMS secrets sanitized.
  */
 export const getMyDocuments = async (req: AuthRequest, res: Response) => {
   try {
@@ -821,8 +846,13 @@ export const getMyDocuments = async (req: AuthRequest, res: Response) => {
 
     const checksummed = ethers.getAddress(citizenAddress);
 
-    const documents = await prisma.documentMetadata.findMany({
-      where: { citizenAddress: checksummed },
+    const rawDocs = await prisma.documentMetadata.findMany({
+      where: {
+        citizenAddress: {
+          equals: checksummed,
+          mode: 'insensitive',
+        },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         grants: {
@@ -831,12 +861,12 @@ export const getMyDocuments = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    const onChainHashes = await relayerService.getCitizenDocuments(checksummed);
+    const documents = rawDocs.map(sanitizeDocument);
 
     res.json({
       success: true,
       documents,
-      onChainHashes,
+      count: documents.length,
     });
   } catch (err: any) {
     console.error('getMyDocuments error:', err);
@@ -845,54 +875,194 @@ export const getMyDocuments = async (req: AuthRequest, res: Response) => {
 };
 
 /**
- * Fetches document metadata and IPFS CID by document hash or ID.
+ * Issuer Management Ledger:
+ * Returns documents minted by the calling issuer with optional filtering and grant summaries.
  */
-export const getDocumentByHash = async (req: AuthRequest, res: Response) => {
+export const getIssuedDocuments = async (req: AuthRequest, res: Response) => {
   try {
-    const rawParam = req.params.documentHash;
+    const issuerAddress = req.user?.address;
+    if (!issuerAddress) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const checksummed = ethers.getAddress(issuerAddress);
+    const { citizenAddress, docType, isRevoked } = req.query;
+
+    const where: any = {
+      issuerAddress: {
+        equals: checksummed,
+        mode: 'insensitive',
+      },
+    };
+
+    if (citizenAddress && typeof citizenAddress === 'string') {
+      if (ethers.isAddress(citizenAddress.trim())) {
+        where.citizenAddress = {
+          equals: ethers.getAddress(citizenAddress.trim()),
+          mode: 'insensitive',
+        };
+      }
+    }
+
+    if (docType && typeof docType === 'string') {
+      where.docType = docType.trim();
+    }
+
+    if (isRevoked !== undefined) {
+      where.isRevoked = String(isRevoked).toLowerCase() === 'true';
+    }
+
+    const rawDocs = await prisma.documentMetadata.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        grants: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    const now = new Date();
+    const documents = rawDocs.map((doc) => {
+      const sanitized = sanitizeDocument(doc);
+      const activeGrants = doc.grants.filter(
+        (g) => !g.isRevoked && now <= g.expiresAt && g.viewCount < g.maxViews
+      );
+
+      return {
+        ...sanitized,
+        grantsCount: doc.grants.length,
+        activeGrantsCount: activeGrants.length,
+      };
+    });
+
+    res.json({
+      success: true,
+      documents,
+      count: documents.length,
+    });
+  } catch (err: any) {
+    console.error('getIssuedDocuments error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+/**
+ * Single Document Details:
+ * Fetches single document metadata by ID or documentHash with Zero-Trust RBAC.
+ */
+export const getDocumentById = async (req: AuthRequest, res: Response) => {
+  try {
+    const rawParam = req.params.id || req.params.documentHash;
     const documentIdentifier = Array.isArray(rawParam) ? rawParam[0] : rawParam;
 
     if (!documentIdentifier) {
       return res.status(400).json({ success: false, message: 'Document identifier parameter is required' });
     }
 
-    const metadata = await prisma.documentMetadata.findFirst({
+    const rawDoc = await prisma.documentMetadata.findFirst({
       where: {
         OR: [{ id: documentIdentifier }, { documentHash: documentIdentifier }],
       },
       include: {
-        grants: true,
+        grants: {
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
-    if (!metadata) {
+    if (!rawDoc) {
       return res.status(404).json({ success: false, message: 'Document not found' });
     }
 
-    const onChainRecord = await relayerService.getDocument(metadata.documentHash);
+    // Zero-Trust RBAC: Only citizen or issuer of this document can view full details
+    const callerAddress = req.user?.address ? ethers.getAddress(req.user.address).toLowerCase() : '';
+    const isCitizen = callerAddress === rawDoc.citizenAddress.toLowerCase();
+    const isIssuer = callerAddress === rawDoc.issuerAddress.toLowerCase();
+
+    if (!isCitizen && !isIssuer) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: You do not have permission to view this document',
+      });
+    }
+
+    const document = sanitizeDocument(rawDoc);
 
     res.json({
       success: true,
-      metadata,
-      onChain: {
-        documentHash: onChainRecord.documentHash,
-        issuer: onChainRecord.issuer,
-        citizen: onChainRecord.citizen,
-        docType: onChainRecord.docType,
-        issuedAt: onChainRecord.issuedAt?.toString(),
-        isRevoked: onChainRecord.isRevoked,
-        revocationReason: onChainRecord.revocationReason,
-        supersededBy: onChainRecord.supersededBy,
-        expiresAt: onChainRecord.expiresAt?.toString(),
-      },
+      document,
+      metadata: document,
     });
   } catch (err: any) {
-    console.error('getDocumentByHash error:', err);
+    console.error('getDocumentById error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+/**
+ * Manual Grant Kill-Switch:
+ * Immediately revokes an Ephemeral Verification Grant link early.
+ */
+export const revokeGrant = async (req: AuthRequest, res: Response) => {
+  try {
+    const rawParam = req.params.grantId;
+    const grantIdentifier = Array.isArray(rawParam) ? rawParam[0] : rawParam;
+
+    if (!grantIdentifier) {
+      return res.status(400).json({ success: false, message: 'Grant ID or token is required' });
+    }
+
+    const grant = await prisma.verificationGrant.findFirst({
+      where: {
+        OR: [{ id: grantIdentifier }, { token: grantIdentifier }],
+      },
+      include: {
+        document: true,
+      },
+    });
+
+    if (!grant) {
+      return res.status(404).json({ success: false, message: 'Verification grant not found' });
+    }
+
+    // RBAC check: caller must be either citizen or issuer of the parent document
+    const callerAddress = req.user?.address ? ethers.getAddress(req.user.address).toLowerCase() : '';
+    const isCitizen = callerAddress === grant.document.citizenAddress.toLowerCase();
+    const isIssuer = callerAddress === grant.document.issuerAddress.toLowerCase();
+
+    if (!isCitizen && !isIssuer) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: You do not have permission to revoke this grant',
+      });
+    }
+
+    if (grant.isRevoked) {
+      return res.status(400).json({
+        success: false,
+        message: 'Grant is already revoked',
+      });
+    }
+
+    const updatedGrant = await prisma.verificationGrant.update({
+      where: { id: grant.id },
+      data: { isRevoked: true },
+    });
+
+    res.json({
+      success: true,
+      message: 'Verification grant successfully revoked',
+      grant: updatedGrant,
+    });
+  } catch (err: any) {
+    console.error('revokeGrant error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 };
 
 // Aliases for backwards compatibility
+export const getDocumentByHash = getDocumentById;
 export const issue = issueDocument;
 export const myDocuments = getMyDocuments;
 export const revoke = revokeDocument;

@@ -53,9 +53,9 @@ describe("DocumentIssuanceConsortium", function () {
       const docHash = ethers.id("official_doc_1");
       const docType = "Degree";
 
-      await expect(documentIssuance.connect(issuer1).issueDocument(docHash, citizen1.address, docType))
+      await expect(documentIssuance.connect(issuer1)["issueDocument(bytes32,address,string)"](docHash, citizen1.address, docType))
         .to.emit(documentIssuance, "DocumentIssued")
-        .withArgs(docHash, issuer1.address, citizen1.address);
+        .withArgs(docHash, issuer1.address, citizen1.address, 0);
 
       const record = await documentIssuance.documents(docHash);
       expect(record.documentHash).to.equal(docHash);
@@ -89,37 +89,38 @@ describe("DocumentIssuanceConsortium", function () {
     beforeEach(async function () {
       await documentIssuance.addIssuer(issuer1.address);
       docHash = ethers.id("doc_to_revoke");
-      await documentIssuance.connect(issuer1).issueDocument(docHash, citizen1.address, "Degree");
+      await documentIssuance.connect(issuer1)["issueDocument(bytes32,address,string)"](docHash, citizen1.address, "Degree");
     });
 
     it("Should allow the original issuer to revoke a document", async function () {
-      await expect(documentIssuance.connect(issuer1).revokeDocument(docHash))
+      await expect(documentIssuance.connect(issuer1)["revokeDocument(bytes32)"](docHash))
         .to.emit(documentIssuance, "DocumentRevoked")
-        .withArgs(docHash, issuer1.address);
+        .withArgs(docHash, issuer1.address, "UNSPECIFIED");
 
       const record = await documentIssuance.documents(docHash);
       expect(record.isRevoked).to.equal(true);
+      expect(record.revocationReason).to.equal("UNSPECIFIED");
     });
 
     it("Should prevent revocation by a non-issuer of the document", async function () {
-      await expect(documentIssuance.connect(issuer2).revokeDocument(docHash))
+      await expect(documentIssuance.connect(issuer2)["revokeDocument(bytes32)"](docHash))
         .to.be.revertedWith("Only the issuer can revoke");
 
-      await expect(documentIssuance.connect(unauthorized).revokeDocument(docHash))
+      await expect(documentIssuance.connect(unauthorized)["revokeDocument(bytes32)"](docHash))
         .to.be.revertedWith("Only the issuer can revoke");
     });
 
     it("Should prevent revocation of a non-existent document", async function () {
       const invalidHash = ethers.id("invalid");
 
-      await expect(documentIssuance.connect(issuer1).revokeDocument(invalidHash))
+      await expect(documentIssuance.connect(issuer1)["revokeDocument(bytes32)"](invalidHash))
         .to.be.revertedWith("Document does not exist");
     });
 
     it("Should prevent double revocation", async function () {
-      await documentIssuance.connect(issuer1).revokeDocument(docHash);
+      await documentIssuance.connect(issuer1)["revokeDocument(bytes32)"](docHash);
 
-      await expect(documentIssuance.connect(issuer1).revokeDocument(docHash))
+      await expect(documentIssuance.connect(issuer1)["revokeDocument(bytes32)"](docHash))
         .to.be.revertedWith("Document is already revoked");
     });
   });

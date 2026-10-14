@@ -89,7 +89,7 @@ describe('CryptoService', function () {
     const testDocId = '873d7b59-e7bd-45c2-8fe7-bd3ab7782b37';
     const rawBuffer = Buffer.from('Official Degree Certificate Content', 'utf8');
 
-    it('should embed and extract document watermark', function () {
+    it('should embed and extract HMAC-SHA256 document watermark', function () {
       const stamped = CryptoService.embedDocumentWatermark(rawBuffer, testDocId);
       expect(stamped.length).to.be.greaterThan(rawBuffer.length);
 
@@ -99,12 +99,27 @@ describe('CryptoService', function () {
 
     it('should extract watermark even if body content is modified', function () {
       const stamped = CryptoService.embedDocumentWatermark(rawBuffer, testDocId);
-      // Tamper with content in the middle
+      // Tamper with content in the body
       const tampered = Buffer.from(stamped);
       tampered[5] = 0x58; // modify one byte
 
       const extracted = CryptoService.extractDocumentWatermark(tampered);
       expect(extracted).to.equal(testDocId);
+    });
+
+    it('should reject watermark if HMAC signature is forged or invalid', function () {
+      const forgedTag = Buffer.from(`\n%%CONSORTIUM-FORENSIC-TAG:${testDocId}.` + 'a'.repeat(64) + '%%\n', 'utf8');
+      const forgedBuffer = Buffer.concat([rawBuffer, forgedTag]);
+
+      const extracted = CryptoService.extractDocumentWatermark(forgedBuffer);
+      expect(extracted).to.be.null;
+    });
+
+    it('should reject watermark if docId in tag is modified', function () {
+      const stamped = CryptoService.embedDocumentWatermark(rawBuffer, testDocId);
+      const tamperedTag = stamped.toString('utf8').replace(testDocId, '00000000-0000-0000-0000-000000000000');
+      const extracted = CryptoService.extractDocumentWatermark(Buffer.from(tamperedTag, 'utf8'));
+      expect(extracted).to.be.null;
     });
 
     it('should compute chunk hashes and detect corrupted 4KB chunks', function () {

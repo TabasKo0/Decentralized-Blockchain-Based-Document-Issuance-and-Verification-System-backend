@@ -95,29 +95,66 @@ export class CryptoService {
   }
 
   /**
-   * Embeds an invisible forensic trailer watermark into the document buffer
+   * Embeds an HMAC-SHA256 signed invisible forensic trailer watermark into the document buffer
    * before Keccak-256 hashing and IPFS encryption.
    */
   static embedDocumentWatermark(buffer: Buffer, documentId: string): Buffer {
-    const marker = Buffer.from(`\n%%CONSORTIUM-DOC-ID:${documentId}%%\n`, 'utf8');
+    const masterKey =
+      process.env.MASTER_KMS_KEY ||
+      '0000000000000000000000000000000000000000000000000000000000000000';
+    const hmac = crypto.createHmac('sha256', masterKey).update(documentId).digest('hex');
+    const marker = Buffer.from(
+      `\n%%CONSORTIUM-FORENSIC-TAG:${documentId}.${hmac}%%\n`,
+      'utf8'
+    );
     return Buffer.concat([buffer, marker]);
   }
 
   /**
-   * Extracts the embedded documentId watermark from an uploaded buffer (zero-hint forensics).
+   * Extracts and cryptographically verifies the embedded documentId watermark from an uploaded buffer.
+   * Returns documentId ONLY if the HMAC signature is mathematically valid; returns null if missing, forged, or invalid.
    */
   static extractDocumentWatermark(buffer: Buffer): string | null {
-    // Scan trailer window first (last 2048 bytes)
+    const masterKey =
+      process.env.MASTER_KMS_KEY ||
+      '0000000000000000000000000000000000000000000000000000000000000000';
+
+    const tagRegex = /%%CONSORTIUM-FORENSIC-TAG:([a-fA-F0-9-]+)\.([a-fA-F0-9]{64})%%/;
+
+    // Scan trailer window first (last 2048 bytes) for efficiency
     const trailerWindow = buffer.subarray(Math.max(0, buffer.length - 2048)).toString('utf8');
-    const trailerMatch = trailerWindow.match(/%%CONSORTIUM-DOC-ID:([a-fA-F0-9-]+)%%/);
-    if (trailerMatch) {
-      return trailerMatch[1];
-    }
+    let match = trailerWindow.match(tagRegex);
 
     // Fallback: scan whole buffer as string
-    const fullText = buffer.toString('utf8');
-    const fullMatch = fullText.match(/%%CONSORTIUM-DOC-ID:([a-fA-F0-9-]+)%%/);
-    return fullMatch ? fullMatch[1] : null;
+    if (!match) {
+      const fullText = buffer.toString('utf8');
+      match = fullText.match(tagRegex);
+    }
+
+    if (!match) {
+      return null;
+    }
+
+    const docId = match[1];
+    const extractedHmac = match[2];
+
+    const expectedHmac = crypto
+      .createHmac('sha256', masterKey)
+      .update(docId)
+      .digest('hex');
+
+    if (extractedHmac.length !== expectedHmac.length) {
+      return null;
+    }
+
+    const hmacBuf = Buffer.from(extractedHmac, 'utf8');
+    const expectedBuf = Buffer.from(expectedHmac, 'utf8');
+
+    if (!crypto.timingSafeEqual(hmacBuf, expectedBuf)) {
+      return null;
+    }
+
+    return docId;
   }
 
   /**
